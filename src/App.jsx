@@ -1,231 +1,234 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./App.css";
+
+import { Sidebar } from "./components/Sidebar";
+import { Topbar } from "./components/Topbar";
+import { Toast } from "./components/Toast";
+import { DashboardTab } from "./components/DashboardTab";
+import { CropsTab } from "./components/CropsTab";
+import { WeatherTab } from "./components/WeatherTab";
+import { ResourcesTab } from "./components/ResourcesTab";
+import { OrdersTab } from "./components/OrdersTab";
+
+import { storage } from "./services/storage";
+import {
+  checkBackendHealth,
+  getCrops,
+  createCrop,
+  updateCrop,
+  deleteCrop,
+  getOrders,
+  createOrder,
+  updateOrder,
+  deleteOrder,
+} from "./services/api";
 
 function App() {
   const [activeTab, setActiveTab] = useState("Dashboard");
-  const [crops, setCrops] = useState([
-    { id: 1, name: "Wheat", area: "2 acres", status: "Growing" },
-    { id: 2, name: "Soybean", area: "3 acres", status: "Growing" },
-    { id: 3, name: "Cotton", area: "1 acre", status: "Harvesting" },
-  ]);
+  const [crops, setCrops] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [farmer, setFarmer] = useState(null);
+  const [backendOnline, setBackendOnline] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const [cropName, setCropName] = useState("");
-  const [cropArea, setCropArea] = useState("");
-
-  function addCrop(e) {
-    e.preventDefault();
-
-    if (!cropName.trim() || !cropArea.trim()) return;
-
-    setCrops([
-      ...crops,
-      {
-        id: Date.now(),
-        name: cropName.trim(),
-        area: cropArea.trim() + " acres",
-        status: "Growing",
-      },
-    ]);
-
-    setCropName("");
-    setCropArea("");
+  // Show temporary toast notification
+  function showToast(message, type = "success") {
+    if (typeof message === "object") {
+      setToast(message);
+    } else {
+      setToast({ message, type });
+    }
   }
 
-  const menu = [
-    "Dashboard",
-    "My Crops",
-    "Weather",
-    "Resources",
-    "Orders",
-  ];
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => {
+      setToast(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  // Initial load
+  useEffect(() => {
+    async function initData() {
+      setLoading(true);
+      // Load farmer profile
+      const farmerProfile = storage.getFarmerProfile();
+      setFarmer(farmerProfile);
+
+      // Check backend health
+      const health = await checkBackendHealth();
+      setBackendOnline(health.connected);
+
+      // Load crops & orders
+      const loadedCrops = await getCrops();
+      const loadedOrders = await getOrders();
+      setCrops(loadedCrops);
+      setOrders(loadedOrders);
+      setLoading(false);
+    }
+
+    initData();
+  }, []);
+
+  // Crop Handlers
+  async function handleAddCrop(cropData) {
+    try {
+      const saved = await createCrop(cropData);
+      setCrops((prev) => [saved, ...prev.filter((c) => c.id !== saved.id)]);
+      showToast(`Added "${saved.name}" (${saved.area} acres) to your farm records.`);
+    } catch {
+      showToast("Failed to add crop record.", "error");
+    }
+  }
+
+  async function handleUpdateCrop(cropId, cropData) {
+    try {
+      const updated = await updateCrop(cropId, cropData);
+      setCrops((prev) => prev.map((c) => (c.id === cropId ? updated : c)));
+      showToast(`Updated "${updated.name}" successfully.`);
+    } catch {
+      showToast("Failed to update crop record.", "error");
+    }
+  }
+
+  async function handleDeleteCrop(cropId) {
+    try {
+      const target = crops.find((c) => c.id === cropId);
+      await deleteCrop(cropId);
+      setCrops((prev) => prev.filter((c) => c.id !== cropId));
+      showToast(`Removed "${target?.name || "Crop"}" from records.`);
+    } catch {
+      showToast("Failed to delete crop record.", "error");
+    }
+  }
+
+  // Order Handlers
+  async function handleAddOrder(orderData) {
+    try {
+      const saved = await createOrder(orderData);
+      setOrders((prev) => [saved, ...prev.filter((o) => o.id !== saved.id)]);
+      showToast(`Created Order ${saved.orderNumber} for ₹${Number(saved.totalAmount).toLocaleString("en-IN")}.`);
+    } catch {
+      showToast("Failed to create order.", "error");
+    }
+  }
+
+  async function handleUpdateOrder(orderId, orderData) {
+    try {
+      const updated = await updateOrder(orderId, orderData);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+      showToast(`Updated Order ${updated.orderNumber} (Status: ${updated.status}).`);
+    } catch {
+      showToast("Failed to update order.", "error");
+    }
+  }
+
+  async function handleDeleteOrder(orderId) {
+    try {
+      const target = orders.find((o) => o.id === orderId);
+      await deleteOrder(orderId);
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      showToast(`Deleted order ${target?.orderNumber || "record"}.`);
+    } catch {
+      showToast("Failed to delete order.", "error");
+    }
+  }
+
+  // Reset Demo Data
+  function handleResetDemoData() {
+    if (
+      window.confirm(
+        "Are you sure you want to reset all crops, orders and weather preferences to original demo data?"
+      )
+    ) {
+      const res = storage.resetAllData();
+      if (res) {
+        setCrops(res.crops);
+        setOrders(res.orders);
+        setFarmer(res.farmer);
+        showToast("Demo data reset to initial showcase records.", "info");
+      }
+    }
+  }
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <h2>🌱 AgriTech</h2>
-        <p className="tagline">Smart farming, better future</p>
-
-        <nav>
-          {menu.map((item) => (
-            <button
-              key={item}
-              className={activeTab === item ? "nav-item active" : "nav-item"}
-              onClick={() => setActiveTab(item)}
-            >
-              {item === "Dashboard" && "▦ "}
-              {item === "My Crops" && "🌾 "}
-              {item === "Weather" && "☀️ "}
-              {item === "Resources" && "🧰 "}
-              {item === "Orders" && "📦 "}
-              {item}
-            </button>
-          ))}
-        </nav>
-
-        <div className="sidebar-bottom">
-          <span>👨‍🌾</span>
-          <div>
-            <strong>Farmer</strong>
-            <p>Farm manager</p>
-          </div>
-        </div>
-      </aside>
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        cropsCount={crops.length}
+        ordersCount={orders.length}
+        farmer={farmer}
+        mobileOpen={mobileOpen}
+        setMobileOpen={setMobileOpen}
+      />
 
       <main className="main">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">AGRICULTURE MANAGEMENT</p>
-            <h1>{activeTab}</h1>
+        <Topbar
+          activeTab={activeTab}
+          backendOnline={backendOnline}
+          onResetData={handleResetDemoData}
+          onToggleMobileMenu={() => setMobileOpen(!mobileOpen)}
+        />
+
+        {loading ? (
+          <div className="loading-state">
+            <span className="spinner">🌱</span>
+            <p>Loading farm records...</p>
           </div>
-          <span className="profile">👨‍🌾</span>
-        </header>
-
-        {activeTab === "Dashboard" && (
+        ) : (
           <>
-            <section className="welcome">
-              <div>
-                <p>YOUR FARM, AT A GLANCE</p>
-                <h2>Welcome to your farm! 🌿</h2>
-                <span>Manage your crops and keep track of your farm.</span>
-              </div>
-                <span className="welcome-icon">🌾</span>
-            </section>
+            {activeTab === "Dashboard" && (
+              <DashboardTab
+                crops={crops}
+                orders={orders}
+                farmer={farmer}
+                setActiveTab={setActiveTab}
+              />
+            )}
 
-            <section className="stats">
-              <article className="stat-card">
-                <span>Total Crops</span>
-                <h2>{crops.length}</h2>
-                <p>Registered crops</p>
-              </article>
-              <article className="stat-card">
-                <span>Farm Area</span>
-                <h2>{crops.reduce((sum, crop) => sum + (parseFloat(crop.area) || 0), 0)} acres</h2>
-                <p>Combined crop area</p>
-              </article>
-              <article className="stat-card">
-                <span>Growing</span>
-                <h2>{crops.filter((crop) => crop.status === "Growing").length}</h2>
-                <p>Active crop records</p>
-              </article>
-            </section>
+            {activeTab === "My Crops" && (
+              <CropsTab
+                crops={crops}
+                onAddCrop={handleAddCrop}
+                onUpdateCrop={handleUpdateCrop}
+                onDeleteCrop={handleDeleteCrop}
+              />
+            )}
 
-            <section className="panel">
-              <div className="panel-heading">
-                <div>
-                  <h2>My Crops</h2>
-                  <p>Your current crop records</p>
-                </div>
-                <button
-                  className="primary-button"
-                  onClick={() => setActiveTab("My Crops")}
-                >
-                  + Manage Crops
-                </button>
-              </div>
+            {activeTab === "Weather" && (
+              <WeatherTab onToast={showToast} />
+            )}
 
-              <CropTable crops={crops} />
-            </section>
+            {activeTab === "Resources" && (
+              <ResourcesTab />
+            )}
+
+            {activeTab === "Orders" && (
+              <OrdersTab
+                orders={orders}
+                crops={crops}
+                onAddOrder={handleAddOrder}
+                onUpdateOrder={handleUpdateOrder}
+                onDeleteOrder={handleDeleteOrder}
+              />
+            )}
           </>
         )}
 
-        {activeTab === "My Crops" && (
-          <section className="panel">
-            <h2>Manage your crops</h2>
-            <p>Add a crop and its cultivated area.</p>
-
-            <form className="crop-form" onSubmit={addCrop}>
-              <input
-                value={cropName}
-                onChange={(e) => setCropName(e.target.value)}
-                placeholder="Crop name (e.g. Wheat)"
-                required
-              />
-              <input
-                type="number"
-                min="0.1"
-                step="0.1"
-                value={cropArea}
-                onChange={(e) => setCropArea(e.target.value)}
-                placeholder="Area in acres"
-                required
-              />
-              <button className="primary-button" type="submit">
-                Add Crop
-              </button>
-            </form>
-
-            <CropTable crops={crops} />
-          </section>
-        )}
-
-        {activeTab === "Weather" && (
-          <section className="panel">
-            <h2>Weather information</h2>
-            <p>
-              Weather forecasts will be connected to a live weather service
-              in a later step.
-            </p>
-            <div className="weather-placeholder">
-              <span>🌤️</span>
-              <h3>Weather forecast</h3>
-              <p>Live temperature and rainfall data are not connected yet.</p>
-            </div>
-          </section>
-        )}
-
-        {activeTab === "Resources" && (
-          <section className="panel">
-            <h2>Farming resources</h2>
-            <p>Explore useful categories for managing your farm.</p>
-            <div className="resource-grid">
-              <article>🌱 <h3>Seeds</h3><p>Crop planting supplies</p></article>
-              <article>🧪 <h3>Fertilizers</h3><p>Soil nutrition supplies</p></article>
-              <article>🚜 <h3>Equipment</h3><p>Farm machinery</p></article>
-            </div>
-          </section>
-        )}
-
-        {activeTab === "Orders" && (
-          <section className="panel">
-            <h2>My Orders</h2>
-            <div className="weather-placeholder">
-              <span>📦</span>
-              <h3>No orders yet</h3>
-              <p>Order tracking will be implemented in a later step.</p>
-            </div>
-          </section>
-        )}
-
-        <footer>AgriTech · Empowering farmers through digital technology</footer>
+        <footer className="footer-bar">
+          <div className="footer-content">
+            <span>AgriTech · Empowering farmers through digital technology</span>
+            <span className="footer-separator">·</span>
+            <span>MERN Stack Agricultural Management System</span>
+          </div>
+        </footer>
       </main>
-    </div>
-  );
-}
 
-function CropTable({ crops }) {
-  return (
-    <div className="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Crop name</th>
-            <th>Area</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {crops.map((crop) => (
-            <tr key={crop.id}>
-              <td><strong>{crop.name}</strong></td>
-              <td>{crop.area}</td>
-              <td>
-                <span className="status">{crop.status}</span>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </div>
   );
 }
